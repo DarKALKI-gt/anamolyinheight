@@ -1,0 +1,105 @@
+#include <Wire.h>
+#include <math.h>
+
+// MPU6050 I2C address
+const int MPU_addr = 0x68;
+
+// MPU6050 sensor data variables
+int16_t AcX, AcY, AcZ;
+int minVal = 265;
+int maxVal = 402;
+double x, y, z;
+
+// HC-SR04 sensor pins
+const int trigPin = 8;
+const int echoPin = 7;
+double base; 
+
+// Anomaly detection
+double prevHeight = -1; // initial value
+const double anomalyThreshold = 40.0; // cm, threshold to detect anomaly
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+}
+
+void loop() {
+  // HC-SR04 distance measurement
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH);
+  base = ((duration / 2.0) * 0.0343);
+
+  // MPU6050 angle calculation
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_addr, 14, true);
+  AcX = Wire.read() << 8 | Wire.read();
+  AcY = Wire.read() << 8 | Wire.read();
+  AcZ = Wire.read() << 8 | Wire.read();
+
+  int xAng = map(AcX, minVal, maxVal, -90, 90);
+  int yAng = map(AcY, minVal, maxVal, -90, 90);
+  int zAng = map(AcZ, minVal, maxVal, -90, 90);
+
+  x = RAD_TO_DEG * (atan2(-yAng, -zAng) + PI);
+  y = RAD_TO_DEG * (atan2(-xAng, -zAng) + PI);
+  z = RAD_TO_DEG * (atan2(-yAng, -xAng) + PI);
+
+  // Height calculation
+  double angleRadians = y * (PI / 180.0);
+  double height = base * tan(angleRadians);
+  double adjustedHeight = height + ((2.0 / 15) * height); // Optional correction
+
+  // Print values
+  Serial.print("Distance: ");
+  Serial.print(base);
+  Serial.print(" cm, AngleY: ");
+  Serial.print(y);
+  Serial.print(" degrees, Height: ");
+  Serial.print(adjustedHeight);
+  Serial.print(" cm");
+
+  // Anomaly detection
+  if (prevHeight > 0) {
+    double change = abs(adjustedHeight - prevHeight);
+    if (change > anomalyThreshold) {
+      Serial.print("  ⚠ ANOMALY DETECTED! Height changed by ");
+      Serial.print(change);
+      Serial.print(" cm");
+    }
+  }
+
+  // Update previous height
+  prevHeight = adjustedHeight;
+  Serial.println();
+
+  delay(400);
+}   
+
+
+
+//output like
+
+//Distance: 90.0 cm, AngleY: 60.0 degrees, Height: 155.8 cm
+//Distance: 90.0 cm, AngleY: 61.0 degrees, Height: 167.2 cm
+//Distance: 90.0 cm, AngleY: 76.0 degrees, Height: 374.6 cm  ⚠ ANOMALY DETECTED! Height changed by 207.4 cm
+
+//🧠 Explanation Summary:
+//Variable	Role
+//prevHeight	Stores last measured height
+//adjustedHeight	Current height (with optional correction)
+//change	Difference between current & previous
+//threshold	If change > threshold, flag anomaly
