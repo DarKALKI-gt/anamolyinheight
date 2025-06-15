@@ -1,0 +1,69 @@
+#include "DHT.h"
+
+#define DHTPIN 2        // Pin where the DHT sensor is connected
+#define DHTTYPE DHT22   // or DHT11 depending on your sensor
+
+DHT dht(DHTPIN, DHTTYPE);
+
+// Previous readings
+float lastTemp = -100.0;
+float lastHum = -100.0;
+
+// Thresholds
+const float tempThreshold = 5.0;   // Max allowed °C change per hour
+const float humThreshold = 10.0;   // Max allowed % change per hour
+
+void setup() {
+  Serial.begin(9600);
+  dht.begin();
+}
+
+void loop() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // Check if readings are valid
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  Serial.print("Temp: ");
+  Serial.print(temperature);
+  Serial.print(" °C, Humidity: ");
+  Serial.print(humidity);
+  Serial.print(" %");
+
+  // Anomaly Detection Logic
+  if (lastTemp > -99 && lastHum > -99) {
+    float tempDiff = abs(temperature - lastTemp);
+    float humDiff = abs(humidity - lastHum);
+
+    if (tempDiff > tempThreshold) {
+      Serial.print("  ⚠️ Temp Anomaly! ΔT = ");
+      Serial.print(tempDiff);
+      Serial.print(" °C");
+    }
+
+    if (humDiff > humThreshold) {
+      Serial.print("  ⚠️ Humidity Anomaly! ΔH = ");
+      Serial.print(humDiff);
+      Serial.print(" %");
+    }
+  }
+
+  // Update last readings
+  lastTemp = temperature;
+  lastHum = humidity;
+
+  Serial.println();
+
+  // Simulate hourly reading (use 3600000 for 1 hour delay in real use)
+  delay(10000); // Short delay for demo; change to 3600000 ms for hourly
+}
+
+output like (not tested)
+
+Temp: 27.5 °C, Humidity: 60.0 %
+Temp: 33.0 °C, Humidity: 59.5 %  ⚠️ Temp Anomaly! ΔT = 5.5 °C
+Temp: 32.5 °C, Humidity: 70.0 %  ⚠️ Humidity Anomaly! ΔH = 10.5 %
