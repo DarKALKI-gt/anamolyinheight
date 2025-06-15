@@ -1,0 +1,148 @@
+#include <Wire.h>
+#include <math.h>
+#include "DHT.h"
+
+// MPU6050 I2C address
+const int MPU_addr = 0x68;
+
+// MPU6050 data
+int16_t AcX, AcY, AcZ;
+int minVal = 265;
+int maxVal = 402;
+double x, y, z;
+double base;
+
+// HC-SR04 pins
+const int trigPin = 8;
+const int echoPin = 7;
+
+// DHT sensor config
+#define DHTPIN 2
+#define DHTTYPE DHT22  // or DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// Anomaly tracking
+double prevHeight = -1;
+const double anomalyThreshold = 40.0;
+float lastTemp = -100.0;
+float lastHum = -100.0;
+const float tempThreshold = 5.0;
+const float humThreshold = 10.0;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  dht.begin();
+
+  // Wake up MPU6050
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
+
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+}
+
+void loop() {
+  // --- HC-SR04 ---
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH);
+  base = ((duration / 2.0) * 0.0343);
+
+  // --- MPU6050 ---
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_addr, 14, true);
+  AcX = Wire.read() << 8 | Wire.read();
+  AcY = Wire.read() << 8 | Wire.read();
+  AcZ = Wire.read() << 8 | Wire.read();
+
+  int xAng = map(AcX, minVal, maxVal, -90, 90);
+  int yAng = map(AcY, minVal, maxVal, -90, 90);
+  int zAng = map(AcZ, minVal, maxVal, -90, 90);
+
+  y = RAD_TO_DEG * (atan2(-xAng, -zAng) + PI);
+
+  double angleRadians = y * (PI / 180.0);
+  double height = base * tan(angleRadians);
+  double adjustedHeight = height + ((2.0 / 15) * height); // correction
+
+  Serial.print("Distance: ");
+  Serial.print(base);
+  Serial.print(" cm, AngleY: ");
+  Serial.print(y);
+  Serial.print("°, Height: ");
+  Serial.print(adjustedHeight);
+  Serial.print(" cm");
+
+  if (prevHeight > 0) {
+    double change = abs(adjustedHeight - prevHeight);
+    if (change > anomalyThreshold) {
+      Serial.print(" ⚠ ANOMALY DETECTED in Height! ΔH = ");
+      Serial.print(change);
+    }
+  }
+  prevHeight = adjustedHeight;
+
+  // --- DHT Sensor ---
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  if (!isnan(temperature) && !isnan(humidity)) {
+    Serial.print(" | Temp: ");
+    Serial.print(temperature);
+    Serial.print("°C, Hum: ");
+    Serial.print(humidity);
+    Serial.print("%");
+
+    if (lastTemp > -99 && lastHum > -99) {
+      float tempDiff = abs(temperature - lastTemp);
+      float humDiff = abs(humidity - lastHum);
+      if (tempDiff > tempThreshold) {
+        Serial.print(" ⚠ Temp Anomaly! ΔT = ");
+        Serial.print(tempDiff);
+      }
+      if (humDiff > humThreshold) {
+        Serial.print(" ⚠ Humidity Anomaly! ΔH = ");
+        Serial.print(humDiff);
+      }
+    }
+    lastTemp = temperature;
+    lastHum = humidity;
+  }
+
+  Serial.println();
+  delay(10000); // Every 10 seconds (you can increase to 1hr in real deployment)
+}
+
+OUTPUT LIKE
+
+Distance: 90.0 cm, AngleY: 60.0°, Height: 155.88 cm | Temp: 27.5°C, Hum: 60.0%
+Distance: 90.0 cm, AngleY: 61.0°, Height: 167.22 cm ⚠ ANOMALY DETECTED in Height! ΔH = 11.34 | Temp: 33.0°C, Hum: 59.5% ⚠ Temp Anomaly! ΔT = 5.5
+Distance: 90.0 cm, AngleY: 76.0°, Height: 374.66 cm ⚠ ANOMALY DETECTED in Height! ΔH = 207.44 | Temp: 32.5°C, Hum: 70.0% ⚠ Humidity Anomaly! ΔH = 10.5
+
+  CONNECTIONS
+
+  Correct Connection Summary
+  
+Sensor	Pin Name	Arduino Uno Pin	✅ Valid?	💬 Notes
+
+MPU6050	VCC	3.3V	✅	Required: 3.3V only (not 5V)
+GND	GND	✅	Common ground
+SDA	A4	✅	I²C Data
+SCL	A5	✅	I²C Clock
+
+HC-SR04	VCC	5V	✅	Works only on 5V
+GND	GND	✅	Common ground
+Trig	D8	✅	Any digital pin
+Echo	D7	✅	Add voltage divider if needed
+
+DHT11/22	VCC	5V	✅	Works on 5V
+GND	GND	✅	Common ground
+Data	D2	✅	Any digital pin
